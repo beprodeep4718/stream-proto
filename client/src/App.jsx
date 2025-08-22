@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   StreamVideo,
   StreamVideoClient,
   StreamCall,
-  Call,
   CallControls,
   SpeakerLayout,
   StreamTheme,
@@ -11,24 +10,17 @@ import {
 import "@stream-io/video-react-sdk/dist/css/styles.css";
 import { getToken } from "./lib/getToken";
 
-/**
- * Quick Start
- * 1) npm i @stream-io/video-react-sdk
- * 2) Replace API_KEY and TOKEN with values from your backend that creates Stream access tokens.
- *    - Never hardcode or mint tokens on the client in production.
- * 3) Drop <MeetingApp /> anywhere in your React app.
- *
- * Features covered by default CallControls: mic on/off, camera on/off, screen share, leave call.
- */
-
 const API_KEY = import.meta?.env?.VITE_STREAM_API_KEY || "fy25ysphvp9x";
-
 
 export default function App() {
   const [token, setToken] = useState("");
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("");
   const [callId, setCallId] = useState("");
+  const [call, setCall] = useState(null);
+  const [joined, setJoined] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const client = useMemo(() => {
     if (!API_KEY || !token || !userId) return null;
@@ -38,63 +30,68 @@ export default function App() {
       token,
     });
   }, [token, userId, userName]);
-  // Fetch token from server when userId changes
+
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
     (async () => {
       try {
+        setError("");
         const t = await getToken(userId);
-        setToken(t);
+        if (!cancelled) setToken(t);
       } catch (e) {
-        setToken("");
-        // Optionally handle error
+        if (!cancelled) {
+          setToken("");
+          setError("Failed to fetch token. Please try again.");
+        }
       }
     })();
+    return () => { cancelled = true; };
   }, [userId]);
-
-  const [call, setCall] = useState(null);
-  const [joined, setJoined] = useState(false);
 
   useEffect(() => {
     return () => {
-      // cleanup on unmount
       (async () => {
         try {
           await call?.leave();
-        } catch (e) {
-          // ignore
-        }
+        } catch {}
       })();
     };
   }, [call]);
 
-  const handleJoin = async (e) => {
+  const handleJoin = useCallback(async (e) => {
     e?.preventDefault?.();
-    if (!client || !callId) return;
+    if (!client || !callId || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const _call = client.call("default", callId);
+      await _call.join({ create: true, audio: true, video: true });
+      setCall(_call);
+      setJoined(true);
+    } catch (err) {
+      setError("Failed to join call. Please check your details.");
+    } finally {
+      setLoading(false);
+    }
+  }, [client, callId, loading]);
 
-    const _call = client.call("default", callId);
-    await _call.join({
-      create: true,
-      audio: true,
-      video: true,
-    });
-    setCall(_call);
-    setJoined(true);
-  };
-
-  const handleLeave = async () => {
+  const handleLeave = useCallback(async () => {
     try {
       await call?.leave();
     } finally {
       setJoined(false);
       setCall(null);
+      setUserName("");
+      setCallId("");
+      setUserId("");
     }
-  };
+  }, [call]);
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 text-gray-900">
-      <div className="mx-auto max-w-6xl p-4">
-        <header className="mb-4 flex items-center justify-between">
+    <div className="h-screen w-full bg-gray-50 text-gray-900">
+      <div className="mx-auto p-4">
+        {/* <header className="mb-4 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">GetStream Meeting App</h1>
           <a
             className="text-sm underline opacity-80 hover:opacity-100"
@@ -104,7 +101,7 @@ export default function App() {
           >
             Docs
           </a>
-        </header>
+        </header> */}
 
         {!joined && (
           <form
@@ -118,6 +115,7 @@ export default function App() {
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
                 required
+                autoFocus
               />
             </div>
 
@@ -141,15 +139,27 @@ export default function App() {
               <p className="text-xs opacity-70">Share this Call ID with others to join the same room.</p>
             </div>
 
-            {/* Token is fetched automatically from the server. */}
+            {error && (
+              <div className="text-xs text-red-600">{error}</div>
+            )}
 
             <div className="pt-2">
               <button
                 type="submit"
-                className="rounded-xl bg-black px-4 py-2 text-white hover:opacity-90"
-                disabled={!token || !userId || !callId}
+                className="rounded-xl bg-black px-4 py-2 text-white hover:opacity-90 flex items-center justify-center"
+                disabled={!token || !userId || !callId || loading}
               >
-                Join Call
+                {loading ? (
+                  <span>
+                    <svg className="inline mr-2 w-4 h-4 animate-spin" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                    </svg>
+                    Joining...
+                  </span>
+                ) : (
+                  "Join Call"
+                )}
               </button>
             </div>
           </form>
@@ -159,15 +169,8 @@ export default function App() {
           <StreamVideo client={client}>
             <StreamCall call={call}>
               <StreamTheme>
-                {/* Layout with active speaker focus; swap to <PaginatedGridLayout /> if you prefer grid */}
-                <div className="rounded-2xl bg-white p-2 shadow">
                   <SpeakerLayout />
-                </div>
-
-                {/* Built-in controls include: mic toggle, camera toggle, screen share, device settings, leave call */}
-                <div className="mt-3 rounded-2xl bg-white p-2 shadow">
                   <CallControls onLeave={handleLeave} />
-                </div>
               </StreamTheme>
             </StreamCall>
           </StreamVideo>
