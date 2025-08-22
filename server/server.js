@@ -12,6 +12,7 @@ app.use(cors());
 
 const API_KEY = process.env.STREAM_API_KEY;
 const SECRET = process.env.STREAM_API_SECRET;
+const PORT = process.env.PORT || 3001;
 
 // Init server-side client
 const client = new StreamClient(API_KEY, SECRET);
@@ -29,4 +30,4 @@ app.post("/token", (req, res) => {
   res.json({ token });
 });
 
-app.listen(3001, () => console.log("Auth server running on http://localhost:3001"));
+app.listen(PORT, () => console.log(`Auth server running on http://localhost:${PORT}`));
